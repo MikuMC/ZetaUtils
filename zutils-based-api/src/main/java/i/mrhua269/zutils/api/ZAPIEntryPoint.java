@@ -13,15 +13,15 @@ public class ZAPIEntryPoint {
     private static final String BASE_PACKAGE_NAME = "i.mrhua269.zutils.nms.";
     private static final String API_PACKAGE_NAME = "i.mrhua269.zutils";
 
-    private static final String FOLIA_SCHEDULER_SERVICE_CLASS_NAME = getBaseAPIModuleName() + ".impl.scheduler.FoliaSchedulerServiceImpl";
-    private static final String BUKKIT_SCHEDULER_SERVICE_CLASS_NAME = getBaseAPIModuleName() + ".impl.scheduler.BukkitSchedulerServiceImpl";
+    private static final String FOLIA_SCHEDULER_SERVICE_CLASS_NAME;
+    private static final String BUKKIT_SCHEDULER_SERVICE_CLASS_NAME;
 
-    private static final String FOLIA_TELEPORTER_CLASS_NAME = getBaseAPIModuleName() + ".impl.teleporter.FoliaTeleporterImpl";
-    private static final String BUKKIT_TELEPORTER_CLASS_NAME = getBaseAPIModuleName() + ".impl.teleporter.BukkitTeleporterImpl";
-    private static final String FOLIA_WORLD_MANAGER_CLASS_NAME = getBaseNMSModuleName() + ".impl.FoliaWorldManagerImpl";
-    private static final String BUKKIT_WORLD_MANAGER_CLASS_NAME = getBaseAPIModuleName() + ".impl.BukkitWorldManagerImpl";
+    private static final String FOLIA_TELEPORTER_CLASS_NAME;
+    private static final String BUKKIT_TELEPORTER_CLASS_NAME;
+    private static final String FOLIA_WORLD_MANAGER_CLASS_NAME;
+    private static final String BUKKIT_WORLD_MANAGER_CLASS_NAME;
 
-    private static String NMS_VERSION;
+    private static final String NMS_VERSION;
 
     private static SchedulerService SCHEDULER_SERVICE;
     private static Teleporter TELEPORTER;
@@ -30,6 +30,15 @@ public class ZAPIEntryPoint {
     private static boolean isFolia = false;
 
     static {
+        NMS_VERSION = Utils.getServerNMSVersion();
+        FOLIA_TELEPORTER_CLASS_NAME = getBaseAPIModuleName() + ".impl.teleporter.FoliaTeleporterImpl";
+        BUKKIT_TELEPORTER_CLASS_NAME = getBaseAPIModuleName() + ".impl.teleporter.BukkitTeleporterImpl";
+        FOLIA_WORLD_MANAGER_CLASS_NAME = getBaseNMSModuleName() + ".impl.FoliaWorldManagerImpl";
+        BUKKIT_WORLD_MANAGER_CLASS_NAME = getBaseAPIModuleName() + ".impl.BukkitWorldManagerImpl";
+
+        FOLIA_SCHEDULER_SERVICE_CLASS_NAME = getBaseAPIModuleName() + ".impl.scheduler.FoliaSchedulerServiceImpl";
+        BUKKIT_SCHEDULER_SERVICE_CLASS_NAME = getBaseAPIModuleName() + ".impl.scheduler.BukkitSchedulerServiceImpl";
+
         try {
             Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
             isFolia = true;
@@ -43,8 +52,6 @@ public class ZAPIEntryPoint {
     }
 
     public static void init(){
-        NMS_VERSION = Utils.getServerNMSVersion();
-
         try {
             initSchedulerService();
             initTeleporter();

@@ -6,6 +6,6 @@ import org.jetbrains.annotations.NotNull;
 public class Utils {
     @NotNull
     public static String getServerNMSVersion(){
-        return "v" + Bukkit.getMinecraftVersion().replace(".","_");
+        return "v" + Bukkit.getServer().getMinecraftVersion().replace(".","_");
     }
 }

@@ -6,3 +6,7 @@ dependencies {
     paperweight.foliaDevBundle("1.20.4-R0.1-SNAPSHOT")
     implementation(project(":zutils-based-api"))
 }
+
+configurations.reobf {
+    outgoing.artifact(layout.buildDirectory.file("libs/${project.name}-${project.version}.jar"))
+}
