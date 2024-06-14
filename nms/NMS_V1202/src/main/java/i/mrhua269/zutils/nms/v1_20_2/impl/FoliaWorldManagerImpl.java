@@ -6,10 +6,15 @@ import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.DynamicOps;
 import com.mojang.serialization.Lifecycle;
 import i.mrhua269.zutils.api.WorldManager;
+import io.papermc.paper.chunk.system.io.RegionFileIOThread;
+import io.papermc.paper.chunk.system.scheduling.ChunkHolderManager;
+import io.papermc.paper.chunk.system.scheduling.NewChunkHolder;
+import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -19,6 +24,7 @@ import net.minecraft.server.dedicated.DedicatedServerProperties;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.util.GsonHelper;
+import net.minecraft.util.ProgressListener;
 import net.minecraft.util.datafix.DataFixers;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.entity.ai.village.VillageSiege;
@@ -47,13 +53,16 @@ import org.bukkit.generator.ChunkGenerator;
 import org.bukkit.generator.WorldInfo;
 import org.jetbrains.annotations.NotNull;
 
+import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.text.DecimalFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 public class FoliaWorldManagerImpl implements WorldManager {
 
@@ -70,6 +79,113 @@ public class FoliaWorldManagerImpl implements WorldManager {
                 throw new RuntimeException(e);
             }
         });
+    }
+
+    private void saveAllChunksNoCheck(ServerLevel level, @NotNull ChunkHolderManager holderManager, final boolean flush, final boolean shutdown, final boolean logProgress, final boolean first, final boolean last) {
+        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Saving all chunks can be done only on global tick thread");
+
+        final List<NewChunkHolder> holders = holderManager.getChunkHolders(); //We don't need current region because all regions are killed right now
+
+        if (first && logProgress) {
+            MinecraftServer.LOGGER.info("Saving all chunkholders for world '" + level.getWorld().getName() + "'");
+        }
+
+        final DecimalFormat format = new DecimalFormat("#0.00");
+
+        int saved = 0;
+
+        final long start = System.nanoTime();
+        long lastLog = start;
+        boolean needsFlush = false;
+        final int flushInterval = 50;
+
+        int savedChunk = 0;
+        int savedEntity = 0;
+        int savedPoi = 0;
+
+        for (int i = 0, len = holders.size(); i < len; ++i) {
+            final NewChunkHolder holder = holders.get(i);
+            if (!RegionizedServer.isGlobalTickThread()) {
+                continue;
+            }
+            try {
+                final NewChunkHolder.SaveStat saveStat = holder.save(shutdown, false);
+                if (saveStat != null) {
+                    ++saved;
+                    needsFlush = flush;
+                    if (saveStat.savedChunk()) {
+                        ++savedChunk;
+                    }
+                    if (saveStat.savedEntityChunk()) {
+                        ++savedEntity;
+                    }
+                    if (saveStat.savedPoiChunk()) {
+                        ++savedPoi;
+                    }
+                }
+            } catch (ThreadDeath killSignal) {
+                throw killSignal;
+            } catch (final Throwable ex) {
+                MinecraftServer.LOGGER.error("Failed to save chunk (" + holder.chunkX + "," + holder.chunkZ + ") in world '" + level.getWorld().getName() + "'", ex);
+            }
+
+            if (needsFlush && (saved % flushInterval) == 0) {
+                needsFlush = false;
+                RegionFileIOThread.partialFlush(flushInterval / 2);
+            }
+
+            if (logProgress) {
+                final long currTime = System.nanoTime();
+                if ((currTime - lastLog) > TimeUnit.SECONDS.toNanos(10L)) {
+                    lastLog = currTime;
+                    MinecraftServer.LOGGER.info("Saved " + saved + " chunks (" + format.format((double)(i+1)/(double)len * 100.0) + "%) in world '" + level.getWorld().getName() + "'");
+                }
+            }
+        }
+
+        if (last && flush) {
+            RegionFileIOThread.flush();
+            if (level.paperConfig().chunks.flushRegionsOnSave) {
+                try {
+                    level.chunkSource.chunkMap.regionFileCache.flush();
+                } catch (IOException ex) {
+                    MinecraftServer.LOGGER.error("Exception when flushing regions in world {}", level.getWorld().getName(), ex);
+                }
+            }
+        }
+
+        if (logProgress) {
+            MinecraftServer.LOGGER.info("Saved " + savedChunk + " block chunks, " + savedEntity + " entity chunks, " + savedPoi + " poi chunks in world '" + level.getWorld().getName() + "' in " + format.format(1.0E-9 * (System.nanoTime() - start)) + "s");
+        }
+    }
+
+    public void save(@NotNull ServerLevel level, @Nullable ProgressListener progressListener, boolean flush, boolean savingDisabled) {
+        // Paper start - rewrite chunk system - add close param
+        this.save(level, progressListener, flush, savingDisabled, false);
+    }
+
+    public void save(@NotNull ServerLevel level, @Nullable ProgressListener progressListener, boolean flush, boolean savingDisabled, boolean close) {
+        if (!savingDisabled) {
+            org.bukkit.Bukkit.getPluginManager().callEvent(new org.bukkit.event.world.WorldSaveEvent(level.getWorld())); // CraftBukkit
+
+            if (progressListener != null) {
+                progressListener.progressStartNoAbort(Component.translatable("menu.savingLevel"));
+            }
+
+            level.saveLevelData();
+            if (progressListener != null) {
+                progressListener.progressStage(Component.translatable("menu.savingChunks"));
+            }
+            if (!close) this.saveAllChunksNoCheck(level, level.chunkTaskScheduler.chunkHolderManager, flush, false, false,true,true); // Paper - rewrite chunk system
+            if (close) this.closeChunkProvider(level, true);
+
+        } else if (close) {
+            this.closeChunkProvider(level, false);
+        }
+    }
+
+    private void closeChunkProvider(@NotNull ServerLevel handle, boolean save){
+        handle.chunkTaskScheduler.chunkHolderManager.close(save, true,true, true, false);
     }
 
     @Override
@@ -110,7 +226,7 @@ public class FoliaWorldManagerImpl implements WorldManager {
                 handle.save(null, true, false);
             }
 
-            handle.chunkTaskScheduler.chunkHolderManager.close(save, true,true, true, false);
+            this.closeChunkProvider(handle, save);
             handle.convertable.close();
         } catch (Exception ex) {
             Bukkit.getLogger().log(java.util.logging.Level.SEVERE, null, ex);
@@ -132,6 +248,7 @@ public class FoliaWorldManagerImpl implements WorldManager {
         console.removeLevel(handle);
         return true;
     }
+
 
     @Override
     public boolean unloadWorld(@NotNull String name, boolean save) {
