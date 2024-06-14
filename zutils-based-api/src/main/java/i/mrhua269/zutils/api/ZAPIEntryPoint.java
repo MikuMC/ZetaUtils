@@ -18,11 +18,14 @@ public class ZAPIEntryPoint {
 
     private static final String FOLIA_TELEPORTER_CLASS_NAME = getBaseAPIModuleName() + ".impl.teleporter.FoliaTeleporterImpl";
     private static final String BUKKIT_TELEPORTER_CLASS_NAME = getBaseAPIModuleName() + ".impl.teleporter.BukkitTeleporterImpl";
+    private static final String FOLIA_WORLD_MANAGER_CLASS_NAME = getBaseNMSModuleName() + ".impl.FoliaWorldManagerImpl";
+    private static final String BUKKIT_WORLD_MANAGER_CLASS_NAME = getBaseAPIModuleName() + ".impl.BukkitWorldManagerImpl";
 
     private static String NMS_VERSION;
 
     private static SchedulerService SCHEDULER_SERVICE;
     private static Teleporter TELEPORTER;
+    private static WorldManager WORLDMANAGER;
 
     private static boolean isFolia = false;
 
@@ -45,6 +48,7 @@ public class ZAPIEntryPoint {
         try {
             initSchedulerService();
             initTeleporter();
+            initWorldManager();
         }catch (Exception e){
             throw new RuntimeException(e);
         }
@@ -58,6 +62,11 @@ public class ZAPIEntryPoint {
     @NotNull
     public static Teleporter getTeleporter(){
         return TELEPORTER;
+    }
+
+    @NotNull
+    public static WorldManager getWorldManager(){
+        return WORLDMANAGER;
     }
 
     @Contract(pure = true)
@@ -82,5 +91,12 @@ public class ZAPIEntryPoint {
         final Constructor<?> constructor = teleporterClass.getConstructor();
 
         TELEPORTER = (Teleporter) constructor.newInstance();
+    }
+
+    private static void initWorldManager() throws ClassNotFoundException, InvocationTargetException, InstantiationException, IllegalAccessException, NoSuchMethodException {
+        final Class<?> teleporterClass = isFolia() ? Class.forName(FOLIA_WORLD_MANAGER_CLASS_NAME) : Class.forName(BUKKIT_WORLD_MANAGER_CLASS_NAME);
+        final Constructor<?> constructor = teleporterClass.getConstructor();
+
+        WORLDMANAGER = (WorldManager) constructor.newInstance();
     }
 }
