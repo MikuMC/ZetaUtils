@@ -14,17 +14,14 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.NbtException;
 import net.minecraft.nbt.ReportedNbtException;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.WorldLoader;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.dedicated.DedicatedServerProperties;
-import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.util.GsonHelper;
-import net.minecraft.util.ProgressListener;
 import net.minecraft.util.datafix.DataFixers;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.entity.ai.village.VillageSiege;
@@ -63,8 +60,6 @@ import java.util.concurrent.TimeUnit;
 import org.bukkit.craftbukkit.CraftServer;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.craftbukkit.generator.CraftWorldInfo;
-
-import javax.annotation.Nullable;
 
 public class FoliaWorldManagerImpl implements WorldManager {
 
@@ -161,23 +156,17 @@ public class FoliaWorldManagerImpl implements WorldManager {
         }
     }
 
-    public void save(@NotNull ServerLevel level, @Nullable ProgressListener progressListener, boolean flush, boolean savingDisabled) {
+    public void save(@NotNull ServerLevel level, boolean flush, boolean savingDisabled) {
         // Paper start - rewrite chunk system - add close param
-        this.save(level, progressListener, flush, savingDisabled, false);
+        this.save(level, flush, savingDisabled, false);
     }
 
-    public void save(@NotNull ServerLevel level, @Nullable ProgressListener progressListener, boolean flush, boolean savingDisabled, boolean close) {
+    public void save(@NotNull ServerLevel level, boolean flush, boolean savingDisabled, boolean close) {
         if (!savingDisabled) {
             org.bukkit.Bukkit.getPluginManager().callEvent(new org.bukkit.event.world.WorldSaveEvent(level.getWorld())); // CraftBukkit
 
-            if (progressListener != null) {
-                progressListener.progressStartNoAbort(Component.translatable("menu.savingLevel"));
-            }
-
             level.saveLevelData(!close);
-            if (progressListener != null) {
-                progressListener.progressStage(Component.translatable("menu.savingChunks"));
-            }
+
             if (!close) this.saveAllChunksNoCheck(level, level.chunkTaskScheduler.chunkHolderManager, flush, false, false,true,true); // Paper - rewrite chunk system
             if (close) this.closeChunkProvider(level, true);
 
@@ -230,7 +219,7 @@ public class FoliaWorldManagerImpl implements WorldManager {
             this.killAllThreadedRegionsOnce(handle);
 
             if (save) {
-                handle.save(null, true, false);
+                this.save(handle, true, false);
             }
 
             this.closeChunkProvider(handle, save);
