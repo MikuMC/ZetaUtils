@@ -82,11 +82,6 @@ public class FoliaWorldManagerImpl implements WorldManager {
         io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Saving all chunks can be done only on global tick thread");
 
         final List<NewChunkHolder> holders = holderManager.getChunkHolders(); //We don't need current region because all regions are killed right now
-
-        if (first && logProgress) {
-            MinecraftServer.LOGGER.info("Saving all chunkholders for world '" + level.getWorld().getName() + "'");
-        }
-
         final DecimalFormat format = new DecimalFormat("#0.00");
 
         int saved = 0;
@@ -150,10 +145,6 @@ public class FoliaWorldManagerImpl implements WorldManager {
                 }
             }
         }
-
-        if (logProgress) {
-            MinecraftServer.LOGGER.info("Saved " + savedChunk + " block chunks, " + savedEntity + " entity chunks, " + savedPoi + " poi chunks in world '" + level.getWorld().getName() + "' in " + format.format(1.0E-9 * (System.nanoTime() - start)) + "s");
-        }
     }
 
     public void save(@NotNull ServerLevel level, boolean flush, boolean savingDisabled) {
@@ -176,6 +167,19 @@ public class FoliaWorldManagerImpl implements WorldManager {
 
     private void closeChunkProvider(@NotNull ServerLevel handle, boolean save){
         handle.chunkTaskScheduler.chunkHolderManager.close(save, true,true, true, false);
+    }
+
+    private void removeWorldFromRegionizedServer(ServerLevel level){
+        try {
+            final Class<RegionizedServer> targetClass = RegionizedServer.class;
+            final Field worldListField = targetClass.getDeclaredField("worlds");
+            worldListField.setAccessible(true);
+            final List<ServerLevel> worldList = (List<ServerLevel>) worldListField.get(RegionizedServer.getInstance());
+
+            worldList.remove(level);
+        }catch (Exception e){
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -210,6 +214,7 @@ public class FoliaWorldManagerImpl implements WorldManager {
         }
 
         try {
+            this.removeWorldFromRegionizedServer(handle);
             this.killAllThreadedRegionsOnce(handle);
 
             if (save) {

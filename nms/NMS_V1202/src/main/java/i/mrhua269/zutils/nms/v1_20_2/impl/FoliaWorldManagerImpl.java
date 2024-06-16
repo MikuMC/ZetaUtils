@@ -83,10 +83,6 @@ public class FoliaWorldManagerImpl implements WorldManager {
 
         final List<NewChunkHolder> holders = holderManager.getChunkHolders(); //We don't need current region because all regions are killed right now
 
-        if (first && logProgress) {
-            MinecraftServer.LOGGER.info("Saving all chunkholders for world '" + level.getWorld().getName() + "'");
-        }
-
         final DecimalFormat format = new DecimalFormat("#0.00");
 
         int saved = 0;
@@ -130,14 +126,6 @@ public class FoliaWorldManagerImpl implements WorldManager {
                 needsFlush = false;
                 RegionFileIOThread.partialFlush(flushInterval / 2);
             }
-
-            if (logProgress) {
-                final long currTime = System.nanoTime();
-                if ((currTime - lastLog) > TimeUnit.SECONDS.toNanos(10L)) {
-                    lastLog = currTime;
-                    MinecraftServer.LOGGER.info("Saved " + saved + " chunks (" + format.format((double)(i+1)/(double)len * 100.0) + "%) in world '" + level.getWorld().getName() + "'");
-                }
-            }
         }
 
         if (last && flush) {
@@ -149,10 +137,6 @@ public class FoliaWorldManagerImpl implements WorldManager {
                     MinecraftServer.LOGGER.error("Exception when flushing regions in world {}", level.getWorld().getName(), ex);
                 }
             }
-        }
-
-        if (logProgress) {
-            MinecraftServer.LOGGER.info("Saved " + savedChunk + " block chunks, " + savedEntity + " entity chunks, " + savedPoi + " poi chunks in world '" + level.getWorld().getName() + "' in " + format.format(1.0E-9 * (System.nanoTime() - start)) + "s");
         }
     }
 
@@ -177,6 +161,19 @@ public class FoliaWorldManagerImpl implements WorldManager {
 
     private void closeChunkProvider(@NotNull ServerLevel handle, boolean save){
         handle.chunkTaskScheduler.chunkHolderManager.close(save, true,true, true, false);
+    }
+
+    private void removeWorldFromRegionizedServer(ServerLevel level){
+        try {
+            final Class<RegionizedServer> targetClass = RegionizedServer.class;
+            final Field worldListField = targetClass.getDeclaredField("worlds");
+            worldListField.setAccessible(true);
+            final List<ServerLevel> worldList = (List<ServerLevel>) worldListField.get(RegionizedServer.getInstance());
+
+            worldList.remove(level);
+        }catch (Exception e){
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -211,6 +208,7 @@ public class FoliaWorldManagerImpl implements WorldManager {
         }
 
         try {
+            this.removeWorldFromRegionizedServer(handle);
             this.killAllThreadedRegionsOnce(handle);
 
             if (save) {
