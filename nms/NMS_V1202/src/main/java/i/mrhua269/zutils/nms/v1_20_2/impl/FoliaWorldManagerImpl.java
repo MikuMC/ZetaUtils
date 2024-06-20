@@ -78,6 +78,43 @@ public class FoliaWorldManagerImpl implements WorldManager {
         });
     }
 
+    public void closeChunkHolderManager(final ServerLevel world, final ChunkHolderManager manager, final boolean save, final boolean halt, final boolean first, final boolean last, final boolean checkRegions) {
+        if (first && halt) {
+            MinecraftServer.LOGGER.info("Waiting 60s for chunk system to halt for world '" + world.getWorld().getName() + "'");
+            if (!world.chunkTaskScheduler.halt(true, TimeUnit.SECONDS.toNanos(60L))) {
+                MinecraftServer.LOGGER.warn("Failed to halt world generation/loading tasks for world '" + world.getWorld().getName() + "'");
+            } else {
+                MinecraftServer.LOGGER.info("Halted chunk system for world '" + world.getWorld().getName() + "'");
+            }
+        }
+
+        if (save) {
+            this.saveAllChunksNoCheck(world, manager, true, true, true, first, last);
+        }
+
+        if (last) {
+            if (world.chunkDataControllerNew.hasTasks() || world.entityDataControllerNew.hasTasks() || world.poiDataControllerNew.hasTasks()) {
+                RegionFileIOThread.flush();
+            }
+
+            try {
+                world.chunkDataControllerNew.getCache().close();
+            } catch (final IOException ex) {
+                MinecraftServer.LOGGER.error("Failed to close chunk regionfile cache for world '" + world.getWorld().getName() + "'", ex);
+            }
+            try {
+                world.entityDataControllerNew.getCache().close();
+            } catch (final IOException ex) {
+                MinecraftServer.LOGGER.error("Failed to close entity regionfile cache for world '" + world.getWorld().getName() + "'", ex);
+            }
+            try {
+                world.poiDataControllerNew.getCache().close();
+            } catch (final IOException ex) {
+                MinecraftServer.LOGGER.error("Failed to close poi regionfile cache for world '" + world.getWorld().getName() + "'", ex);
+            }
+        }
+    }
+
     private void saveAllChunksNoCheck(ServerLevel level, @NotNull ChunkHolderManager holderManager, final boolean flush, final boolean shutdown, final boolean logProgress, final boolean first, final boolean last) {
         io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Saving all chunks can be done only on global tick thread");
 
@@ -160,7 +197,7 @@ public class FoliaWorldManagerImpl implements WorldManager {
     }
 
     private void closeChunkProvider(@NotNull ServerLevel handle, boolean save){
-        handle.chunkTaskScheduler.chunkHolderManager.close(save, true,true, true, false);
+        this.closeChunkHolderManager(handle, handle.chunkTaskScheduler.chunkHolderManager, save, true,true, true, false);
     }
 
     private void removeWorldFromRegionizedServer(ServerLevel level){
