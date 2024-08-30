@@ -32,7 +32,7 @@ jobs:
       - name: Build
         run: gradle shadowJar
       - name: Publish to repo
-        run: gradlew publish
+        run: gradle publish
       - name: Upload Artifact
         uses: "actions/upload-artifact@v4"
         with:
