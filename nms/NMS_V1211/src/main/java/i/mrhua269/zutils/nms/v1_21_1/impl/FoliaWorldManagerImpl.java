@@ -1,21 +1,24 @@
-package i.mrhua269.zutils.nms.v1_20_2.impl;
+package i.mrhua269.zutils.nms.v1_21_1.impl;
 
+import ca.spottedleaf.moonrise.common.util.CoordinateUtils;
+import ca.spottedleaf.moonrise.common.util.WorldUtil;
+import ca.spottedleaf.moonrise.patches.chunk_system.io.RegionFileIOThread;
+import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
+import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.mojang.datafixers.util.Pair;
-import com.mojang.serialization.DynamicOps;
+import com.mojang.serialization.Dynamic;
 import com.mojang.serialization.Lifecycle;
 import i.mrhua269.zutils.api.WorldManager;
-import io.papermc.paper.chunk.system.io.RegionFileIOThread;
-import io.papermc.paper.chunk.system.scheduling.ChunkHolderManager;
-import io.papermc.paper.chunk.system.scheduling.NewChunkHolder;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
+import it.unimi.dsi.fastutil.longs.LongIterator;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.nbt.NbtOps;
-import net.minecraft.nbt.Tag;
-import net.minecraft.resources.RegistryOps;
+import net.minecraft.nbt.NbtException;
+import net.minecraft.nbt.ReportedNbtException;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.WorldLoader;
 import net.minecraft.server.dedicated.DedicatedServer;
@@ -23,7 +26,6 @@ import net.minecraft.server.dedicated.DedicatedServerProperties;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.util.GsonHelper;
-import net.minecraft.util.datafix.DataFixers;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.entity.ai.village.VillageSiege;
 import net.minecraft.world.entity.npc.CatSpawner;
@@ -35,15 +37,12 @@ import net.minecraft.world.level.levelgen.PatrolSpawner;
 import net.minecraft.world.level.levelgen.PhantomSpawner;
 import net.minecraft.world.level.levelgen.WorldDimensions;
 import net.minecraft.world.level.levelgen.WorldOptions;
+import net.minecraft.world.level.storage.LevelDataAndDimensions;
 import net.minecraft.world.level.storage.LevelStorageSource;
 import net.minecraft.world.level.storage.PrimaryLevelData;
-import net.minecraft.world.level.storage.WorldData;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
-import org.bukkit.craftbukkit.v1_20_R2.CraftServer;
-import org.bukkit.craftbukkit.v1_20_R2.CraftWorld;
-import org.bukkit.craftbukkit.v1_20_R2.generator.CraftWorldInfo;
 import org.bukkit.event.world.WorldLoadEvent;
 import org.bukkit.event.world.WorldUnloadEvent;
 import org.bukkit.generator.BiomeProvider;
@@ -60,6 +59,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+
+import org.bukkit.craftbukkit.CraftServer;
+import org.bukkit.craftbukkit.CraftWorld;
+import org.bukkit.craftbukkit.generator.CraftWorldInfo;
 
 public class FoliaWorldManagerImpl implements WorldManager {
 
@@ -84,53 +87,40 @@ public class FoliaWorldManagerImpl implements WorldManager {
             }
         });
     }
-    public void closeChunkHolderManager(final ServerLevel world, final ChunkHolderManager manager, final boolean save, final boolean halt, final boolean first, final boolean last, final boolean checkRegions) {
-        if (first && halt) {
-            MinecraftServer.LOGGER.info("Waiting 60s for chunk system to halt for world '" + world.getWorld().getName() + "'");
-            if (!world.chunkTaskScheduler.halt(true, TimeUnit.SECONDS.toNanos(60L))) {
-                MinecraftServer.LOGGER.warn("Failed to halt world generation/loading tasks for world '" + world.getWorld().getName() + "'");
-            } else {
-                MinecraftServer.LOGGER.info("Halted chunk system for world '" + world.getWorld().getName() + "'");
-            }
-        }
 
-        if (save) {
-            this.saveAllChunksNoCheck(world, manager, true, true, true, first, last);
-        }
-
-        if (last) {
-            if (world.chunkDataControllerNew.hasTasks() || world.entityDataControllerNew.hasTasks() || world.poiDataControllerNew.hasTasks()) {
-                RegionFileIOThread.flush();
-            }
-
-            try {
-                world.chunkDataControllerNew.getCache().close();
-            } catch (final IOException ex) {
-                MinecraftServer.LOGGER.error("Failed to close chunk regionfile cache for world '" + world.getWorld().getName() + "'", ex);
-            }
-            try {
-                world.entityDataControllerNew.getCache().close();
-            } catch (final IOException ex) {
-                MinecraftServer.LOGGER.error("Failed to close entity regionfile cache for world '" + world.getWorld().getName() + "'", ex);
-            }
-            try {
-                world.poiDataControllerNew.getCache().close();
-            } catch (final IOException ex) {
-                MinecraftServer.LOGGER.error("Failed to close poi regionfile cache for world '" + world.getWorld().getName() + "'", ex);
-            }
-        }
-    }
-
-    private void saveAllChunksNoCheck(ServerLevel level, @NotNull ChunkHolderManager holderManager, final boolean flush, final boolean shutdown, final boolean logProgress, final boolean first, final boolean last) {
+    private void saveAllChunksNoCheck(ServerLevel world, @NotNull ChunkHolderManager holderManager, final boolean flush, final boolean shutdown, final boolean logProgress, final boolean first, final boolean last) {
         io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Saving all chunks can be done only on global tick thread");
 
-        final List<NewChunkHolder> holders = holderManager.getChunkHolders(); //We don't need current region because all regions are killed right now
+        final List<NewChunkHolder> holders = new java.util.ArrayList<>(holderManager.getChunkHolders().size() / 10);
+        // we could iterate through all chunk holders with thread checks, however for many regions the iteration cost alone
+        // will multiply. to avoid this, we can simply iterate through all owned sections
+        final int regionShift = world.moonrise$getRegionChunkShift();
+        for (final LongIterator iterator = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion().getOwnedSectionsUnsynchronised(); iterator.hasNext();) {
+            final long sectionKey = iterator.nextLong();
+            final int width = 1 << regionShift;
+            final int offsetX = CoordinateUtils.getChunkX(sectionKey) << regionShift;
+            final int offsetZ = CoordinateUtils.getChunkZ(sectionKey) << regionShift;
+
+            for (int dz = 0; dz < width; ++dz) {
+                for (int dx = 0; dx < width; ++dx) {
+                    final NewChunkHolder holder = holderManager.getChunkHolder(offsetX | dx, offsetZ | dz);
+                    if (holder != null) {
+                        holders.add(holder);
+                    }
+                }
+            }
+        }
+        // Folia end - region threading
+
+        if (first && logProgress) { // Folia - region threading
+            MinecraftServer.LOGGER.info("Saving all chunkholders for world '{}'", WorldUtil.getWorldName(world));
+        }
 
         final DecimalFormat format = new DecimalFormat("#0.00");
 
         int saved = 0;
 
-        final long start = System.nanoTime();
+        long start = System.nanoTime();
         long lastLog = start;
         boolean needsFlush = false;
         final int flushInterval = 50;
@@ -141,11 +131,8 @@ public class FoliaWorldManagerImpl implements WorldManager {
 
         for (int i = 0, len = holders.size(); i < len; ++i) {
             final NewChunkHolder holder = holders.get(i);
-            if (!RegionizedServer.isGlobalTickThread()) {
-                continue;
-            }
             try {
-                final NewChunkHolder.SaveStat saveStat = holder.save(shutdown, false);
+                final NewChunkHolder.SaveStat saveStat = holder.save(shutdown);
                 if (saveStat != null) {
                     ++saved;
                     needsFlush = flush;
@@ -159,27 +146,33 @@ public class FoliaWorldManagerImpl implements WorldManager {
                         ++savedPoi;
                     }
                 }
-            } catch (ThreadDeath killSignal) {
-                throw killSignal;
-            } catch (final Throwable ex) {
-                MinecraftServer.LOGGER.error("Failed to save chunk (" + holder.chunkX + "," + holder.chunkZ + ") in world '" + level.getWorld().getName() + "'", ex);
+            } catch (final Throwable thr) {
+                MinecraftServer.LOGGER.error("Failed to save chunk ({},{}) in world '{}'", holder.chunkX, holder.chunkZ, WorldUtil.getWorldName(world), thr);
             }
 
             if (needsFlush && (saved % flushInterval) == 0) {
                 needsFlush = false;
                 RegionFileIOThread.partialFlush(flushInterval / 2);
             }
-        }
 
-        if (last && flush) {
-            RegionFileIOThread.flush();
-            if (level.paperConfig().chunks.flushRegionsOnSave) {
-                try {
-                    level.chunkSource.chunkMap.regionFileCache.flush();
-                } catch (IOException ex) {
-                    MinecraftServer.LOGGER.error("Exception when flushing regions in world {}", level.getWorld().getName(), ex);
+            if (logProgress) {
+                final long currTime = System.nanoTime();
+                if ((currTime - lastLog) > TimeUnit.SECONDS.toNanos(10L)) {
+                    lastLog = currTime;
+                    MinecraftServer.LOGGER.info("Saved {} chunks ({}%) in world '{}'", saved, format.format((double) (i + 1) / (double) len * 100.0), WorldUtil.getWorldName(world));
                 }
             }
+        }
+        if (last && flush) { // Folia - region threading
+            RegionFileIOThread.flush();
+            try {
+                RegionFileIOThread.flushRegionStorages(world);
+            } catch (final IOException ex) {
+                MinecraftServer.LOGGER.error("Exception when flushing regions in world '{}'", WorldUtil.getWorldName(world), ex);
+            }
+        }
+        if (logProgress) {
+            MinecraftServer.LOGGER.info("Saved {} block chunks, {} entity chunks, {} poi chunks in world '{}' in {}s", savedChunk, savedEntity, savedPoi, WorldUtil.getWorldName(world), format.format(1.0E-9 * (System.nanoTime() - start)));
         }
     }
 
@@ -192,9 +185,9 @@ public class FoliaWorldManagerImpl implements WorldManager {
         if (!savingDisabled) {
             org.bukkit.Bukkit.getPluginManager().callEvent(new org.bukkit.event.world.WorldSaveEvent(level.getWorld())); // CraftBukkit
 
-            level.saveLevelData();
+            level.saveLevelData(!close);
 
-            if (!close) this.saveAllChunksNoCheck(level, level.chunkTaskScheduler.chunkHolderManager, flush, false, false,true,true); // Paper - rewrite chunk system
+            if (!close) this.saveAllChunksNoCheck(level, level.moonrise$getChunkTaskScheduler().chunkHolderManager, flush, false, false,true,true); // Paper - rewrite chunk system
             if (close) this.closeChunkProvider(level, true);
 
         } else if (close) {
@@ -203,8 +196,53 @@ public class FoliaWorldManagerImpl implements WorldManager {
     }
 
     private void closeChunkProvider(@NotNull ServerLevel handle, boolean save){
-        this.closeChunkHolderManager(handle, handle.chunkTaskScheduler.chunkHolderManager, save, true,true, true, false);
+        this.closeChunkHolderManager(handle, handle.moonrise$getChunkTaskScheduler().chunkHolderManager, save, true,true, true, false);
+        try {
+            handle.chunkSource.getDataStorage().close();
+        } catch (IOException exception) {
+            MinecraftServer.LOGGER.error("Failed to close persistent world data", exception);
+        }
     }
+
+    public void closeChunkHolderManager(final ServerLevel world, final ChunkHolderManager manager, final boolean save, final boolean halt, final boolean first, final boolean last, final boolean checkRegions) {
+        if (first && halt) {
+            MinecraftServer.LOGGER.info("Waiting 60s for chunk system to halt for world '" + world.getWorld().getName() + "'");
+            if (!world.moonrise$getChunkTaskScheduler().halt(true, TimeUnit.SECONDS.toNanos(60L))) {
+                MinecraftServer.LOGGER.warn("Failed to halt world generation/loading tasks for world '" + world.getWorld().getName() + "'");
+            } else {
+                MinecraftServer.LOGGER.info("Halted chunk system for world '" + world.getWorld().getName() + "'");
+            }
+        }
+
+        if (save) {
+            this.saveAllChunksNoCheck(world, manager, true, true, true, first, last); // Folia - region threading
+        }
+
+        if (last) { // Folia - region threading
+            boolean hasTasks = false;
+
+            for (final RegionFileIOThread.RegionFileType type : RegionFileIOThread.RegionFileType.values()) {
+                if (RegionFileIOThread.getControllerFor(world, type).hasTasks()) {
+                    hasTasks = true;
+                    break;
+                }
+            }
+
+            if (hasTasks) {
+                RegionFileIOThread.flush();
+            }
+
+            // kill regionfile cache
+            for (final RegionFileIOThread.RegionFileType type : RegionFileIOThread.RegionFileType.values()) {
+                try {
+                    RegionFileIOThread.getControllerFor(world, type).getCache().close();
+                } catch (final IOException ex) {
+                    MinecraftServer.LOGGER.error("Failed to close '" + type.name() + "' regionfile cache for world '" + WorldUtil.getWorldName(world) + "'", ex);
+                }
+            }
+        } // Folia - region threading
+    }
+
 
     private void removeWorldFromRegionizedServer(ServerLevel level){
         try {
@@ -281,7 +319,6 @@ public class FoliaWorldManagerImpl implements WorldManager {
         return true;
     }
 
-
     @Override
     public boolean unloadWorld(@NotNull String name, boolean save) {
         return this.unloadWorld(Bukkit.getWorld(name),save);
@@ -294,27 +331,20 @@ public class FoliaWorldManagerImpl implements WorldManager {
         DedicatedServer console = craftServer.getServer();
 
         String name = creator.name();
-
-        String levelName = console.getProperties().levelName;
-        if (name.equals(levelName)
-                || (console.isNetherEnabled() && name.equals(levelName + "_nether"))
-                || (craftServer.getAllowEnd() && name.equals(levelName + "_the_end"))
-        ) {
-            return null;
-        }
-
         ChunkGenerator generator = creator.generator();
         BiomeProvider biomeProvider = creator.biomeProvider();
         File folder = new File(craftServer.getWorldContainer(), name);
-        org.bukkit.World world = craftServer.getWorld(name);
+        World world = craftServer.getWorld(name);
 
-        CraftWorld worldByKey = (CraftWorld) craftServer.getWorld(creator.key());
+        // Paper start
+        World worldByKey = craftServer.getWorld(creator.key());
         if (world != null || worldByKey != null) {
-            if (world != worldByKey) {
+            if (world == worldByKey) {
                 return world;
             }
             throw new IllegalArgumentException("Cannot create a world with key " + creator.key() + " and name " + name + " one (or both) already match a world that exists");
         }
+        // Paper end
 
         if (folder.exists()) {
             Preconditions.checkArgument(folder.isDirectory(), "File (%s) exists and isn't a folder", name);
@@ -327,6 +357,7 @@ public class FoliaWorldManagerImpl implements WorldManager {
         if (biomeProvider == null) {
             biomeProvider = craftServer.getBiomeProvider(name);
         }
+
 
         ResourceKey<LevelStem> actualDimension = switch (creator.environment()) {
             case NORMAL -> LevelStem.OVERWORLD;
@@ -342,18 +373,55 @@ public class FoliaWorldManagerImpl implements WorldManager {
             throw new RuntimeException(ex);
         }
 
+        Dynamic<?> dynamic;
+        if (worldSession.hasWorldData()) {
+            net.minecraft.world.level.storage.LevelSummary worldinfo;
+
+            try {
+                dynamic = worldSession.getDataTag();
+                worldinfo = worldSession.getSummary(dynamic);
+            } catch (NbtException | ReportedNbtException | IOException ioexception) {
+                LevelStorageSource.LevelDirectory convertable_b = worldSession.getLevelDirectory();
+
+                MinecraftServer.LOGGER.warn("Failed to load world data from {}", convertable_b.dataFile(), ioexception);
+                MinecraftServer.LOGGER.info("Attempting to use fallback");
+
+                try {
+                    dynamic = worldSession.getDataTagFallback();
+                    worldinfo = worldSession.getSummary(dynamic);
+                } catch (NbtException | ReportedNbtException | IOException ioexception1) {
+                    MinecraftServer.LOGGER.error("Failed to load world data from {}", convertable_b.oldDataFile(), ioexception1);
+                    MinecraftServer.LOGGER.error("Failed to load world data from {} and {}. World files may be corrupted. Shutting down.", convertable_b.dataFile(), convertable_b.oldDataFile());
+                    return null;
+                }
+
+                worldSession.restoreLevelDataFromOld();
+            }
+
+            if (worldinfo.requiresManualConversion()) {
+                MinecraftServer.LOGGER.info("This world must be opened in an older version (like 1.6.4) to be safely converted");
+                return null;
+            }
+
+            if (!worldinfo.isCompatible()) {
+                MinecraftServer.LOGGER.info("This world was created by an incompatible version.");
+                return null;
+            }
+        } else {
+            dynamic = null;
+        }
+
         boolean hardcore = creator.hardcore();
 
         PrimaryLevelData worlddata;
         WorldLoader.DataLoadContext worldloader_a = console.worldLoader;
-        net.minecraft.core.Registry<LevelStem> iregistry = worldloader_a.datapackDimensions().registryOrThrow(Registries.LEVEL_STEM);
-        DynamicOps<Tag> dynamicops = RegistryOps.create(NbtOps.INSTANCE, worldloader_a.datapackWorldgen());
-        Pair<WorldData, WorldDimensions.Complete> pair = worldSession.getDataTag(dynamicops, worldloader_a.dataConfiguration(), iregistry, worldloader_a.datapackWorldgen().allRegistriesLifecycle());
+        RegistryAccess.Frozen iregistrycustom_dimension = worldloader_a.datapackDimensions();
+        net.minecraft.core.Registry<LevelStem> iregistry = iregistrycustom_dimension.registryOrThrow(Registries.LEVEL_STEM);
+        if (dynamic != null) {
+            LevelDataAndDimensions leveldataanddimensions = LevelStorageSource.getLevelDataAndDimensions(dynamic, worldloader_a.dataConfiguration(), iregistry, worldloader_a.datapackWorldgen());
 
-
-        if (pair != null) {
-            worlddata = (PrimaryLevelData) pair.getFirst();
-            iregistry = pair.getSecond().dimensions();
+            worlddata = (PrimaryLevelData) leveldataanddimensions.worldData();
+            iregistrycustom_dimension = leveldataanddimensions.dimensions().dimensionsRegistryAccess();
         } else {
             LevelSettings worldsettings;
             WorldOptions worldoptions = new WorldOptions(creator.seed(), creator.generateStructures(), false);
@@ -361,15 +429,16 @@ public class FoliaWorldManagerImpl implements WorldManager {
 
             DedicatedServerProperties.WorldDimensionData properties = new DedicatedServerProperties.WorldDimensionData(GsonHelper.parse((creator.generatorSettings().isEmpty()) ? "{}" : creator.generatorSettings()), creator.type().name().toLowerCase(Locale.ROOT));
 
-            worldsettings = new LevelSettings(name, GameType.byId(Bukkit.getServer().getDefaultGameMode().getValue()), hardcore, Difficulty.EASY, false, new GameRules(), worldloader_a.dataConfiguration());
+            worldsettings = new LevelSettings(name, GameType.byId(craftServer.getDefaultGameMode().getValue()), hardcore, Difficulty.EASY, false, new GameRules(), worldloader_a.dataConfiguration());
             worlddimensions = properties.create(worldloader_a.datapackWorldgen());
 
             WorldDimensions.Complete worlddimensions_b = worlddimensions.bake(iregistry);
             Lifecycle lifecycle = worlddimensions_b.lifecycle().add(worldloader_a.datapackWorldgen().allRegistriesLifecycle());
 
             worlddata = new PrimaryLevelData(worldsettings, worldoptions, worlddimensions_b.specialWorldProperty(), lifecycle);
-            iregistry = worlddimensions_b.dimensions();
+            iregistrycustom_dimension = worlddimensions_b.dimensionsRegistryAccess();
         }
+        iregistry = iregistrycustom_dimension.registryOrThrow(Registries.LEVEL_STEM);
         worlddata.customDimensions = iregistry;
         worlddata.checkName(name);
         worlddata.setModdedInfo(console.getServerModName(), console.getModdedStatus().shouldReportAsModified());
@@ -383,14 +452,8 @@ public class FoliaWorldManagerImpl implements WorldManager {
             biomeProvider = generator.getDefaultBiomeProvider(worldInfo);
         }
 
-        if (console.options.has("forceUpgrade")) {
-            net.minecraft.server.Main.convertWorldButItWorks(
-                    actualDimension, worldSession, DataFixers.getDataFixer(), worlddimension.generator().getTypeNameForDataFixer(), console.options.has("eraseCache")
-            );
-        }
-
         ResourceKey<net.minecraft.world.level.Level> worldKey;
-        worldKey = ResourceKey.create(Registries.DIMENSION, new net.minecraft.resources.ResourceLocation(creator.key().getNamespace().toLowerCase(java.util.Locale.ENGLISH), creator.key().getKey().toLowerCase(java.util.Locale.ENGLISH))); // Paper
+        worldKey = ResourceKey.create(Registries.DIMENSION, ResourceLocation.fromNamespaceAndPath(creator.key().getNamespace().toLowerCase(java.util.Locale.ENGLISH), creator.key().getKey().toLowerCase(java.util.Locale.ENGLISH))); // Paper
 
         ServerLevel internal = new ServerLevel(console, console.executor, worldSession, worlddata, worldKey, worlddimension, console.progressListenerFactory.create(11),
                 worlddata.isDebugWorld(), j, creator.environment() == org.bukkit.World.Environment.NORMAL ? list : ImmutableList.of(), true, null, creator.environment(), generator, biomeProvider);
@@ -401,16 +464,13 @@ public class FoliaWorldManagerImpl implements WorldManager {
             for (int currZ = -loadRegionRadius; currZ <= loadRegionRadius; ++currZ) {
                 net.minecraft.world.level.ChunkPos pos = new net.minecraft.world.level.ChunkPos(currX, currZ);
                 internal.chunkSource.addTicketAtLevel(
-                        TicketType.UNKNOWN, pos, io.papermc.paper.chunk.system.scheduling.ChunkHolderManager.MAX_TICKET_LEVEL, pos
+                        TicketType.UNKNOWN, pos, ChunkHolderManager.MAX_TICKET_LEVEL, pos
                 );
             }
         }
 
         console.addLevel(internal);
-
         internal.setSpawnSettings(true, true);
-
-        internal.keepSpawnInMemory = creator.keepSpawnLoaded().toBooleanOrElse(internal.getWorld().getKeepSpawnInMemory()); // Paper
 
         io.papermc.paper.threadedregions.RegionizedServer.getInstance().addWorld(internal);
 

@@ -66,14 +66,21 @@ public class FoliaWorldManagerImpl implements WorldManager {
     //TODO Did we ACTUALLY kill the region?
     private void killAllThreadedRegionsOnce(@NotNull ServerLevel level){
         level.regioniser.computeForAllRegions(region -> {
-            //Ugly reflection :(
-            try {
-                final Class<ThreadedRegionizer.ThreadedRegion> threadedRegionClass = ThreadedRegionizer.ThreadedRegion.class;
-                final Method tryKillMethod = threadedRegionClass.getDeclaredMethod("tryKill");
-                tryKillMethod.setAccessible(true);
-                tryKillMethod.invoke(region);
-            }catch (Exception e){
-                throw new RuntimeException(e);
+            for (;;) {
+                boolean result;
+
+                try {
+                    final Class<?> threadedRegionClass = ThreadedRegionizer.ThreadedRegion.class;
+                    final Method tryKillMethod = threadedRegionClass.getDeclaredMethod("tryKill");
+                    tryKillMethod.setAccessible(true);
+                    result = (boolean) tryKillMethod.invoke(region);
+                }catch (Exception e){
+                    break;
+                }
+
+                if (result) {
+                    break;
+                }
             }
         });
     }
