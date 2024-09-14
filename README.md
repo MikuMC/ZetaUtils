@@ -15,6 +15,9 @@ A simple packaged easy to use MC bukkit plugin library that make plugins work wi
 Environment requirements: Java 21
 After building, you cloud find the final jar in 'zutils-plugin/build/libs/'
 
+## Download
+All built jars are in the CI artifacts, you could find them in Action
+
 ## Credits
  - [DirtyFolia(World API #loadWorld)](https://github.com/killerprojecte/Folia)
  - [Skyllia(World API #loadWorld)](https://github.com/Euphillya/Skyllia)
