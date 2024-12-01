@@ -436,7 +436,7 @@ public class FoliaWorldManagerImpl implements WorldManager {
                 worlddata.isDebugWorld(), j, creator.environment() == org.bukkit.World.Environment.NORMAL ? list : ImmutableList.of(), true, null, creator.environment(), generator, biomeProvider);
 
         internal.randomSpawnSelection = new ChunkPos(internal.getChunkSource().randomState().sampler().findSpawnPosition());
-        int loadRegionRadius = ((32) >> 4);
+        int loadRegionRadius = ((1024) >> 4);
         for (int currX = -loadRegionRadius; currX <= loadRegionRadius; ++currX) {
             for (int currZ = -loadRegionRadius; currZ <= loadRegionRadius; ++currZ) {
                 net.minecraft.world.level.ChunkPos pos = new net.minecraft.world.level.ChunkPos(currX, currZ);

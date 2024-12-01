@@ -19,3 +19,6 @@ findProject(":nms:NMS_V1206")?.name = "NMS_V1206"
 
 include("nms:NMS_V1211")
 findProject(":nms:NMS_V1211")?.name = "NMS_V1211"
+
+include("nms:NMS_V1213")
+findProject(":nms:NMS_V1213")?.name = "NMS_V1213"
