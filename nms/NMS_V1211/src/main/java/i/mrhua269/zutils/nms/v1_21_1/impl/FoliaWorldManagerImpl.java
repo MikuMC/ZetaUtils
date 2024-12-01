@@ -95,21 +95,23 @@ public class FoliaWorldManagerImpl implements WorldManager {
         // we could iterate through all chunk holders with thread checks, however for many regions the iteration cost alone
         // will multiply. to avoid this, we can simply iterate through all owned sections
         final int regionShift = world.moonrise$getRegionChunkShift();
-        for (final LongIterator iterator = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion().getOwnedSectionsUnsynchronised(); iterator.hasNext();) {
-            final long sectionKey = iterator.nextLong();
-            final int width = 1 << regionShift;
-            final int offsetX = CoordinateUtils.getChunkX(sectionKey) << regionShift;
-            final int offsetZ = CoordinateUtils.getChunkZ(sectionKey) << regionShift;
+        world.regioniser.computeForAllRegions(region -> {
+            for (final LongIterator iterator = region.getOwnedSectionsUnsynchronised(); iterator.hasNext();) {
+                final long sectionKey = iterator.nextLong();
+                final int width = 1 << regionShift;
+                final int offsetX = CoordinateUtils.getChunkX(sectionKey) << regionShift;
+                final int offsetZ = CoordinateUtils.getChunkZ(sectionKey) << regionShift;
 
-            for (int dz = 0; dz < width; ++dz) {
-                for (int dx = 0; dx < width; ++dx) {
-                    final NewChunkHolder holder = holderManager.getChunkHolder(offsetX | dx, offsetZ | dz);
-                    if (holder != null) {
-                        holders.add(holder);
+                for (int dz = 0; dz < width; ++dz) {
+                    for (int dx = 0; dx < width; ++dx) {
+                        final NewChunkHolder holder = holderManager.getChunkHolder(offsetX | dx, offsetZ | dz);
+                        if (holder != null) {
+                            holders.add(holder);
+                        }
                     }
                 }
             }
-        }
+        });
         // Folia end - region threading
 
         if (first && logProgress) { // Folia - region threading

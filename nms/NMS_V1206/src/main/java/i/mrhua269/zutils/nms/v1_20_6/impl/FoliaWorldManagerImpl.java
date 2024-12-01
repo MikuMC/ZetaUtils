@@ -92,18 +92,10 @@ public class FoliaWorldManagerImpl implements WorldManager {
 
         final List<NewChunkHolder> holders = holderManager.getChunkHolders(); //We don't need current region because all regions are killed right now
 
-        final DecimalFormat format = new DecimalFormat("#0.00");
-
         int saved = 0;
 
-        final long start = System.nanoTime();
-        long lastLog = start;
         boolean needsFlush = false;
         final int flushInterval = 50;
-
-        int savedChunk = 0;
-        int savedEntity = 0;
-        int savedPoi = 0;
 
         for (int i = 0, len = holders.size(); i < len; ++i) {
             final NewChunkHolder holder = holders.get(i);
@@ -116,13 +108,10 @@ public class FoliaWorldManagerImpl implements WorldManager {
                     ++saved;
                     needsFlush = flush;
                     if (saveStat.savedChunk()) {
-                        ++savedChunk;
                     }
                     if (saveStat.savedEntityChunk()) {
-                        ++savedEntity;
                     }
                     if (saveStat.savedPoiChunk()) {
-                        ++savedPoi;
                     }
                 }
             } catch (ThreadDeath killSignal) {
