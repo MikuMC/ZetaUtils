@@ -3,7 +3,7 @@ plugins {
 }
 
 dependencies {
-    paperweight.devBundle("me.earthme.luminol", "1.21.1-R0.1-20240830.020224-7")
+    paperweight.devBundle("me.earthme.luminol", "1.21.3-R0.1-20241201.004730-1")
     implementation(project(":zutils-based-api"))
 }
 
