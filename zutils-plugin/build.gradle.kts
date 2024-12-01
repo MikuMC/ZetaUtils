@@ -9,4 +9,5 @@ dependencies {
     implementation(project(":nms:NMS_V1204","reobf"))*/
     implementation(project(":nms:NMS_V1206","reobf"))
     implementation(project(":nms:NMS_V1211","reobf"))
+    implementation(project(":nms:NMS_V1213","reobf"))
 }
